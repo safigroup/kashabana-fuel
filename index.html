@@ -310,11 +310,20 @@ function avgCostMap(){ const m={}; S.deliveries.forEach(d=>{const k=d.station+d.
 // ═══════════════════════════════════════
 //  ACTIONS
 // ═══════════════════════════════════════
-function updateLocalInv(station,fuelType,liters,op){
+async function updateInventory(station,fuelType,liters,op){
   let inv=S.inventory.find(i=>i.station===station);
-  if(!inv){inv={id:genId(),station,gasoline_liters:0,diesel_liters:0,gasoline_capacity:50000,diesel_capacity:50000};S.inventory.push(inv);}
-  const f=fuelType==='Gasoline'?'gasoline_liters':'diesel_liters';
-  inv[f]=Math.max(0,(inv[f]||0)+(op==='add'?liters:-liters));
+  const isNew=!inv;
+  if(isNew){inv={id:genId(),station,gasoline_liters:0,diesel_liters:0,gasoline_capacity:50000,diesel_capacity:50000};S.inventory.push(inv);}
+  const field=fuelType==='Gasoline'?'gasoline_liters':'diesel_liters';
+  inv[field]=Math.max(0,(inv[field]||0)+(op==='add'?liters:-liters));
+  inv.updated_at=new Date().toISOString();
+  if(SB){
+    if(isNew){
+      await SB.from('fuel_inventory').insert({id:inv.id,station:inv.station,gasoline_liters:inv.gasoline_liters,diesel_liters:inv.diesel_liters,gasoline_capacity:inv.gasoline_capacity,diesel_capacity:inv.diesel_capacity});
+    } else {
+      await SB.from('fuel_inventory').upsert({id:inv.id,station:inv.station,gasoline_liters:inv.gasoline_liters,diesel_liters:inv.diesel_liters,gasoline_capacity:inv.gasoline_capacity,diesel_capacity:inv.diesel_capacity,updated_at:inv.updated_at},{onConflict:'station'});
+    }
+  }
 }
 async function saveDelivery(){
   const f=S.form;
@@ -325,7 +334,7 @@ async function saveDelivery(){
     liters:parseFloat(f.liters),cost_per_liter:costUSD,total_cost:parseFloat(f.liters)*costUSD,
     truck_plate:f.truck_plate||'',driver:f.driver||'',currency:entCur.code,notes:f.notes||''};
   const ok=await dbInsert('fuel_deliveries',row);if(!ok)return;
-  S.deliveries.unshift(row); updateLocalInv(row.station,row.fuel_type,row.liters,'add');
+  S.deliveries.unshift(row); await updateInventory(row.station,row.fuel_type,row.liters,'add');
   const drv=S.drivers.find(d=>d.name===row.driver);
   if(drv){drv.trips=(drv.trips||0)+1;await dbUpdate('drivers',drv.id,{trips:drv.trips});}
   closeModal();toast('Delivery recorded');
@@ -339,7 +348,7 @@ async function saveSale(){
     liters:parseFloat(f.liters),price_per_liter:priceUSD,total_revenue:parseFloat(f.liters)*priceUSD,
     currency:entCur.code,notes:f.notes||''};
   const ok=await dbInsert('fuel_sales',row);if(!ok)return;
-  S.sales.unshift(row); updateLocalInv(row.station,row.fuel_type,row.liters,'sub');
+  S.sales.unshift(row); await updateInventory(row.station,row.fuel_type,row.liters,'sub');
   closeModal();toast('Sale recorded');
 }
 async function saveDriver(){
