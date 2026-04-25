@@ -303,7 +303,8 @@ function h(tag, attrs={}, ...kids) {
   }
   for (const c of kids.flat(Infinity)) {
     if (c == null || c === false) continue;
-    el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    if (c instanceof Node) el.appendChild(c);
+    else el.appendChild(document.createTextNode(String(c)));
   }
   return el;
 }
