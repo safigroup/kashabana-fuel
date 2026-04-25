@@ -140,7 +140,7 @@
 const CFG_KEY      = 'kashabana_cfg';
 const SETTINGS_KEY = 'kashabana_settings';
 const FUEL_TYPES      = ['Gasoline','Diesel'];
-const SUPPLIERS       = ['Vivo Energy (Shell)','TotalEnergies','COBIL','Other'];
+const DEFAULT_SUPPLIERS = ['Vivo Energy (Shell)','TotalEnergies','COBIL','Other'];
 const DRIVER_STATUSES = ['Active','On Leave','Inactive'];
 const TRUCK_STATUSES  = ['Active','In Maintenance','Retired'];
 const STATION_TYPES   = ['Gas Station','Storage Depot','Blending Facility','Other'];
@@ -169,6 +169,7 @@ let S = {
   ],
   currencies:     _sv.currencies     || DEFAULT_CURRENCIES,
   activeCurrency: _sv.activeCurrency || 'USD',
+  suppliers:      _sv.suppliers      || [...DEFAULT_SUPPLIERS],
 };
 let SB = null;
 let charts = {};
@@ -230,7 +231,7 @@ function avatarStyle(n){ const p=[['#E1F5EE','#0F6E56'],['#E6F1FB','#185FA5'],['
 function genId(){ return crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2); }
 function stationNames(){ return S.stations.map(s=>s.name); }
 function stationTypeIcon(t){ return{Gas:' ⛽','Storage':'🏭','Blending':'⚗️',Other:'📦'}[Object.keys({'Gas':'⛽','Storage':'🏭','Blending':'⚗️'}).find(k=>t&&t.startsWith(k))||'Other']||'📍'; }
-function persistSettings(){ saveSettings({stations:S.stations,currencies:S.currencies,activeCurrency:S.activeCurrency}); }
+function persistSettings(){ saveSettings({stations:S.stations,currencies:S.currencies,activeCurrency:S.activeCurrency,suppliers:S.suppliers}); }
 function toast(msg,isErr=false){ const el=document.getElementById('toast');if(!el)return; el.textContent=msg;el.style.background=isErr?'var(--red)':'var(--text)'; el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2800); }
 function destroyCharts(...ids){ ids.forEach(id=>{if(charts[id]){charts[id].destroy();delete charts[id];}}); }
 
@@ -360,9 +361,10 @@ async function deleteRecord(table,id,arr){
   render();toast('Deleted');
 }
 function addStation(){
-  const f=S.form;if(!f.name){S.error='Name required';render();return;}
-  if(S.stations.find(s=>s.name.toLowerCase()===f.name.toLowerCase())){S.error='Name already exists';render();return;}
-  S.stations.push({id:genId(),name:f.name,type:f.type||'Gas Station',city:f.city||'',country:f.country||'DRC'});
+  const f=S.form;if(!f.name||!f.name.trim()){S.error='Name required';render();return;}
+  const name=f.name.trim();
+  if(S.stations.find(s=>s.name.toLowerCase()===name.toLowerCase())){S.error='Name already exists';render();return;}
+  S.stations.push({id:genId(),name,type:f.type||'Gas Station',city:f.city||'',country:f.country||'DRC'});
   persistSettings();closeModal();toast('Station added');
 }
 function removeStation(id){
@@ -387,6 +389,49 @@ function removeCurrency(code){
   if(S.activeCurrency===code)S.activeCurrency='USD';
   persistSettings();render();
 }
+
+function addSupplier(){
+  const f=S.form;if(!f.sup_name||!f.sup_name.trim()){S.error='Supplier name required';render();return;}
+  const name=f.sup_name.trim();
+  if(S.suppliers.find(s=>s.toLowerCase()===name.toLowerCase())){S.error='Supplier already exists';render();return;}
+  S.suppliers.push(name);
+  persistSettings();closeModal();toast('Supplier added');
+}
+function removeSupplier(name){
+  if(name==='Other'){toast('Cannot remove Other',true);return;}
+  if(!confirm('Remove supplier "'+name+'"?'))return;
+  S.suppliers=S.suppliers.filter(s=>s!==name);
+  persistSettings();render();toast('Supplier removed');
+}
+function editStation(id){
+  const st=S.stations.find(s=>s.id===id); if(!st)return;
+  S.form={name:st.name,type:st.type,city:st.city,country:st.country,_editId:id,_oldName:st.name};
+  S.modal='station';S.error=null;render();
+}
+function saveStation(){
+  const f=S.form;if(!f.name||!f.name.trim()){S.error='Name required';render();return;}
+  const name=f.name.trim();
+  if(f._editId){
+    // editing existing
+    const st=S.stations.find(s=>s.id===f._editId);if(!st)return;
+    const oldName=f._oldName;
+    const conflict=S.stations.find(s=>s.id!==f._editId&&s.name.toLowerCase()===name.toLowerCase());
+    if(conflict){S.error='Name already in use';render();return;}
+    st.name=name;st.type=f.type||st.type;st.city=f.city||'';st.country=f.country||'DRC';
+    // cascade rename across all local arrays
+    if(oldName!==name){
+      S.deliveries.forEach(d=>{if(d.station===oldName)d.station=name;});
+      S.sales.forEach(s=>{if(s.station===oldName)s.station=name;});
+      S.inventory.forEach(i=>{if(i.station===oldName)i.station=name;});
+      S.drivers.forEach(d=>{if(d.station===oldName)d.station=name;});
+      S.trucks.forEach(t=>{if(t.station===oldName)t.station=name;});
+    }
+    persistSettings();closeModal();toast('Station updated');
+  } else {
+    addStation();
+  }
+}
+
 function closeModal(){ S.modal=null;S.form={};S.error=null;render(); }
 
 // ═══════════════════════════════════════
@@ -753,9 +798,26 @@ function renderSettings(){
             h('div',{style:'font-size:11px;color:var(--text2)'},s.type+(s.city?', '+s.city:'')+(s.country?', '+s.country:''))
           )
         ),
-        h('button',{cls:'btn btn-sm btn-danger',onClick:()=>removeStation(s.id)},'Remove')
+        h('div',{style:'display:flex;gap:6px;flex-shrink:0'},
+          h('button',{cls:'btn btn-sm',onClick:()=>editStation(s.id)},'Edit'),
+          h('button',{cls:'btn btn-sm btn-danger',onClick:()=>removeStation(s.id)},'Remove')
+        )
       )),
       S.stations.length===0?h('div',{cls:'empty'},'No stations yet'):null
+    ),
+    // Suppliers
+    h('div',{cls:'card'},
+      h('div',{cls:'card-header'},
+        h('div',{},[h('div',{cls:'card-title'},'Suppliers'),h('div',{style:'font-size:11px;color:var(--text3);margin-top:2px'},S.suppliers.length+' suppliers configured')]),
+        h('button',{cls:'btn btn-sm btn-primary',onClick:()=>{S.modal='supplier';S.form={};S.error=null;render();}},'+ Add supplier')
+      ),
+      h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;'},
+        ...S.suppliers.map(sup=>h('div',{style:'display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-md);padding:5px 10px;'},
+          h('span',{style:'font-size:12px;font-weight:500'},sup),
+          sup==='Other'?null:h('button',{style:'background:none;border:none;cursor:pointer;color:var(--text3);font-size:12px;padding:0 2px;line-height:1',onClick:()=>removeSupplier(sup)},'✕')
+        ))
+      ),
+      S.suppliers.length===0?h('div',{cls:'empty'},'No suppliers'):null
     ),
     // Currencies
     h('div',{cls:'card'},
@@ -803,7 +865,7 @@ function renderModal(){
   const tPlates=S.trucks.filter(t=>t.status==='Active').map(t=>t.plate);
   const dNames=S.drivers.filter(d=>d.status==='Active').map(d=>d.name);
   const sn=stationNames();
-  const titles={delivery:'Record delivery',sale:'Record sale',driver:'Add driver',truck:'Add truck',station:'Add station / depot',currency:'Add currency'};
+  const titles={delivery:'Record delivery',sale:'Record sale',driver:'Add driver',truck:'Add truck',station:S.form._editId?'Edit station / depot':'Add station / depot',currency:'Add currency',supplier:'Add supplier'};
   let fields,onSave;
 
   const curToggle=()=>h('div',{cls:'form-group full'},
@@ -821,7 +883,7 @@ function renderModal(){
     fields=h('div',{cls:'form-grid'},
       inp('Date','date','date','',true),sel('Station','station',sn,'— select —',true),
       sel('Fuel type','fuel_type',FUEL_TYPES,'— select —',true),inp('Liters','liters','number','10000',true),
-      sel('Supplier','supplier',SUPPLIERS,'— select —',true),inp('Cost per liter ('+ec.symbol+')','cost_per_liter','number','',true),
+      sel('Supplier','supplier',S.suppliers,'— select —',true),inp('Cost per liter ('+ec.symbol+')','cost_per_liter','number','',true),
       sel('Truck plate','truck_plate',tPlates,'— optional —'),sel('Driver','driver',dNames,'— optional —'),
       curToggle(),
       h('div',{cls:'form-group full'},h('label',{},'Notes'),h('input',{type:'text',placeholder:'Optional',value:S.form.notes||'',onInput:e=>S.form.notes=e.target.value}))
@@ -851,17 +913,25 @@ function renderModal(){
       h('div',{cls:'form-group full'},h('label',{},'Notes'),h('input',{type:'text',value:S.form.notes||'',onInput:e=>S.form.notes=e.target.value}))
     );onSave=saveTruck;
   } else if(M==='station'){
+    const isEdit=!!S.form._editId;
     fields=h('div',{cls:'form-grid'},
-      inp('Station name','name','text','e.g. Kinshasa Depot',true),sel('Type','type',STATION_TYPES,'Gas Station'),
+      inp('Station name','name','text','e.g. Kinshasa Depot',true),sel('Type','type',STATION_TYPES,S.form.type||'Gas Station'),
       inp('City','city','text','Goma'),inp('Country','country','text','DRC'),
-      h('div',{cls:'form-group full'},h('label',{style:'color:var(--text3)'},'Station names must be unique. They appear immediately in all dropdowns.'))
-    );onSave=addStation;
+      h('div',{cls:'form-group full'},h('label',{style:'color:var(--text3)'},isEdit?'Renaming will update all existing records (deliveries, sales, inventory, drivers, trucks) to the new name.':'Station names must be unique. They appear immediately in all dropdowns.'))
+    );onSave=saveStation;
   } else if(M==='currency'){
     fields=h('div',{cls:'form-grid'},
       inp('Currency code (e.g. EUR)','cur_code','text','',true),inp('Symbol (e.g. €)','cur_symbol','text','',true),
       inp('Full name','cur_name','text','e.g. Euro'),inp('Rate (1 USD = ?)','cur_rate','number','1',true),
       h('div',{cls:'form-group full'},h('label',{style:'color:var(--text3)'},'Example: if 1 USD = 2800 CDF, enter 2800. You can update rates anytime in Settings.'))
     );onSave=addCurrency;
+  } else if(M==='supplier'){
+    fields=h('div',{cls:'form-grid'},
+      h('div',{cls:'form-group full'},
+        h('label',{},'Supplier name *'),
+        h('input',{type:'text',placeholder:'e.g. Puma Energy',value:S.form.sup_name||'',onInput:e=>S.form.sup_name=e.target.value})
+      )
+    );onSave=addSupplier;
   }
 
   return h('div',{cls:'overlay',onClick:e=>{if(e.target===e.currentTarget)closeModal();}},
