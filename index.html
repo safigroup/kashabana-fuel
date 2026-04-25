@@ -1041,10 +1041,21 @@ function render(){
 //  BOOT
 // ═══════════════════════════════════════
 (function boot(){
+  const BUILD_URL = '__SUPABASE_URL__';
+  const BUILD_KEY = '__SUPABASE_ANON_KEY__';
+  const hasBuildCreds = BUILD_URL.startsWith('https://') && BUILD_KEY.length > 20;
   try{
     const cfg=JSON.parse(localStorage.getItem(CFG_KEY)||'{}');
-    if(cfg.url&&cfg.key){initSB(cfg.url,cfg.key);S.form={url:cfg.url,key:cfg.key};S.page='dashboard';render();dbLoad();return;}
+    const url = cfg.url || (hasBuildCreds ? BUILD_URL : null);
+    const key = cfg.key || (hasBuildCreds ? BUILD_KEY : null);
+    if(url&&key){
+      localStorage.setItem(CFG_KEY,JSON.stringify({url,key}));
+      initSB(url,key);S.page='dashboard';render();dbLoad();return;
+    }
   }catch(e){}
+  if(hasBuildCreds){
+    initSB(BUILD_URL,BUILD_KEY);S.page='dashboard';render();dbLoad();return;
+  }
   S.page='setup';render();
 })();
 </script>
